@@ -3,7 +3,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
@@ -73,5 +73,41 @@ export class ApiKeysService {
     }
 
     return null;
+  }
+
+  /**
+   * Lists all active API Keys for a given tenant, omitting secret hashes.
+   */
+  listApiKeys(tenantId: string) {
+    return this.prisma.apiKey.findMany({
+      where: { tenantId },
+      select: {
+        id: true,
+        tenantId: true,
+        name: true,
+        scopes: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  }
+
+  /**
+   * Revokes (deletes) an API Key by ID for a given tenant.
+   */
+  async revokeApiKey(tenantId: string, id: string) {
+    const apiKeyRecord = await this.prisma.apiKey.findFirst({
+      where: { id, tenantId },
+    });
+
+    if (!apiKeyRecord) {
+      throw new NotFoundException('API Key not found');
+    }
+
+    await this.prisma.apiKey.delete({
+      where: { id },
+    });
+
+    return { message: 'API key revoked successfully', id };
   }
 }
