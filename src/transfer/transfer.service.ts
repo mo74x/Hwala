@@ -22,11 +22,14 @@ export class TransferService {
   ) {}
 
   async executeTransfer(
+    tenantId: string,
     senderId: string,
     receiverId: string,
     amount: number,
     description: string,
   ) {
+    if (!tenantId)
+      throw new BadRequestException('Tenant ID is required for transfers');
     if (amount <= 0)
       throw new BadRequestException(
         'Transfer amount must be greater than zero',
@@ -51,6 +54,10 @@ export class TransferService {
         //Fetch the strictly locked sender state
         const sender = await tx.account.findUnique({ where: { id: senderId } });
         if (!sender) throw new BadRequestException('Sender account not found');
+        if (sender.tenantId !== tenantId)
+          throw new BadRequestException(
+            'Sender account does not belong to this tenant',
+          );
         if (Number(sender.balance) < amount)
           throw new BadRequestException('Insufficient funds');
 
@@ -59,6 +66,10 @@ export class TransferService {
         });
         if (!receiver)
           throw new BadRequestException('Receiver account not found');
+        if (receiver.tenantId !== tenantId)
+          throw new BadRequestException(
+            'Receiver account does not belong to this tenant',
+          );
 
         // Update Balances
         await tx.account.update({
@@ -75,12 +86,14 @@ export class TransferService {
         await tx.ledgerEntry.createMany({
           data: [
             {
+              tenantId,
               transactionId,
               accountId: senderId,
               amount: -amount, // Debit
               description,
             },
             {
+              tenantId,
               transactionId,
               accountId: receiverId,
               amount: amount, // Credit
@@ -96,6 +109,7 @@ export class TransferService {
       await this.webhookQueue.add(
         'transfer.completed',
         {
+          tenantId,
           transactionId: result.transactionId,
           senderId,
           receiverId,
