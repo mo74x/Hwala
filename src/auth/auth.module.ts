@@ -5,6 +5,9 @@ import { PassportModule } from '@nestjs/passport';
 import { jwtConstants } from './constants';
 import { JwtStrategy } from './jwt.strategy';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
+import { ApiKeyGuard } from './api-key.guard';
+import { RolesGuard } from './roles.guard';
+import { ScopesGuard } from './scopes.guard';
 
 @Module({
   imports: [
@@ -15,7 +18,7 @@ import { ApiKeysModule } from '../api-keys/api-keys.module';
     }),
     ApiKeysModule, // So we can use ApiKeyGuard which depends on ApiKeysService
   ],
-  providers: [AuthService, JwtStrategy],
-  exports: [AuthService],
+  providers: [AuthService, JwtStrategy, ApiKeyGuard, RolesGuard, ScopesGuard],
+  exports: [AuthService, ApiKeyGuard, RolesGuard, ScopesGuard],
 })
 export class AuthModule {}

@@ -1,14 +1,24 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-import { Body, Controller, Post, UseInterceptors } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Post,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import { IdempotencyInterceptor } from 'src/common/interceptors/idempotency/idempotency.interceptor';
+import { ApiKeyGuard } from '../auth/api-key.guard';
+import { Scopes } from '../auth/scopes.decorator';
+import { ScopesGuard } from '../auth/scopes.guard';
 import { CurrentTenant } from '../tenant/tenant.decorator';
 import { TransferService } from './transfer.service';
 
 @Controller('api/v1/transfers')
+@UseGuards(ApiKeyGuard, ScopesGuard)
 export class TransferController {
   constructor(private readonly transferService: TransferService) {}
 
   @Post()
+  @Scopes('write:transfers')
   //Protects against network retries
   @UseInterceptors(IdempotencyInterceptor)
   async createTransfer(
