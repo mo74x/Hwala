@@ -5,7 +5,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { IdempotencyInterceptor } from 'src/common/interceptors/idempotency/idempotency.interceptor';
+import { IdempotencyInterceptor } from '../common/interceptors/idempotency/idempotency.interceptor';
 import { ApiKeyGuard } from '../auth/api-key.guard';
 import { Scopes } from '../auth/scopes.decorator';
 import { ScopesGuard } from '../auth/scopes.guard';
