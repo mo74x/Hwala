@@ -13,28 +13,81 @@ enum AccountType {
   PLATFORM_REVENUE
 }
 
-model Account {
-  id          String        @id @default(uuid()) @db.Uuid
-  userId      String        @db.Uuid
-  type        AccountType
-  balance     Decimal       @db.Decimal(12, 2) @default(0.00)
-  version     Int           @default(1) 
-  updatedAt   DateTime      @updatedAt
-  createdAt   DateTime      @default(now())
+enum Role {
+  ADMIN
+  SUPPORT
+  API_USER
+}
 
-  entries     LedgerEntry[]
+model Tenant {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users         User[]
+  apiKeys       ApiKey[]
+  accounts      Account[]
+  ledgerEntries LedgerEntry[]
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @db.Uuid
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(API_USER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+model ApiKey {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  name      String
+  keyHash   String   @unique
+  scopes    String[] // e.g., ['read:ledgers', 'write:ledgers']
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+model Account {
+  id        String      @id @default(uuid()) @db.Uuid
+  tenantId  String      @db.Uuid
+  userId    String      @db.Uuid // Optional or required depending on logic, linking to User if it's a specific user's account
+  type      AccountType
+  balance   Decimal     @default(0.00) @db.Decimal(12, 2)
+  version   Int         @default(1)
+  updatedAt DateTime    @updatedAt
+  createdAt DateTime    @default(now())
+
+  tenant  Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  entries LedgerEntry[]
+
+  @@index([tenantId])
 }
 
 model LedgerEntry {
   id            String   @id @default(uuid()) @db.Uuid
-  transactionId String   @db.Uuid 
+  tenantId      String   @db.Uuid
+  transactionId String   @db.Uuid
   accountId     String   @db.Uuid
-  amount        Decimal  @db.Decimal(12, 2) 
+  amount        Decimal  @db.Decimal(12, 2)
   description   String
   createdAt     DateTime @default(now())
 
-  account       Account  @relation(fields: [accountId], references: [id])
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id])
 
   @@index([transactionId])
   @@index([accountId])
+  @@index([tenantId])
 }

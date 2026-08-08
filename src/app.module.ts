@@ -11,6 +11,9 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaService } from './prisma/prisma.service';
 import { SecurityModule } from './security/security.module';
+import { AuthModule } from './auth/auth.module';
+import { TenantModule } from './tenant/tenant.module';
+import { ApiKeysModule } from './api-keys/api-keys.module';
 
 @Module({
   imports: [
@@ -34,6 +37,9 @@ import { SecurityModule } from './security/security.module';
     }),
     TransferModule,
     SecurityModule,
+    AuthModule,
+    TenantModule,
+    ApiKeysModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],
