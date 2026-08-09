@@ -66,15 +66,17 @@ describe('WebhookProcessor', () => {
 
     expect(prismaService.tenant.findUnique).toHaveBeenCalledWith({
       where: { id: jobData.tenantId },
-      select: { webhookSecret: true },
+      select: { webhookSecret: true, webhookUrl: true },
     });
     expect(result.delivered).toBe(true);
     expect(result.signature).toBe(expectedSignature);
+    expect(result.targetUrl).toBe('https://merchant.example.com/webhooks');
   });
 
   it('should fallback to default secret when tenant has no webhookSecret', async () => {
     prismaService.tenant.findUnique.mockResolvedValue({
       webhookSecret: null,
+      webhookUrl: null,
     });
 
     const jobData = {
@@ -95,5 +97,48 @@ describe('WebhookProcessor', () => {
 
     expect(result.delivered).toBe(true);
     expect(result.signature).toBe(expectedSignature);
+    expect(result.targetUrl).toBe('https://merchant.example.com/webhooks');
+  });
+
+  it('should use tenant webhookUrl when present in tenant configuration', async () => {
+    const tenantUrl = 'https://api.tenant-a.com/events';
+    prismaService.tenant.findUnique.mockResolvedValue({
+      webhookSecret: null,
+      webhookUrl: tenantUrl,
+    });
+
+    const jobData = {
+      tenantId: '33333333-3333-3333-3333-333333333333',
+      transactionId: 'tx-003',
+      amount: 250,
+    };
+    const job = { attemptsMade: 0, data: jobData } as Job;
+
+    const result = await processor.process(job);
+
+    expect(result.delivered).toBe(true);
+    expect(result.targetUrl).toBe(tenantUrl);
+  });
+
+  it('should prioritize job level targetUrl over tenant webhookUrl', async () => {
+    const tenantUrl = 'https://api.tenant-a.com/events';
+    const customJobUrl = 'https://override.example.com/webhook';
+    prismaService.tenant.findUnique.mockResolvedValue({
+      webhookSecret: null,
+      webhookUrl: tenantUrl,
+    });
+
+    const jobData = {
+      tenantId: '33333333-3333-3333-3333-333333333333',
+      transactionId: 'tx-004',
+      targetUrl: customJobUrl,
+      amount: 250,
+    };
+    const job = { attemptsMade: 0, data: jobData } as Job;
+
+    const result = await processor.process(job);
+
+    expect(result.delivered).toBe(true);
+    expect(result.targetUrl).toBe(customJobUrl);
   });
 });

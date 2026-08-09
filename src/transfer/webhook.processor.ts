@@ -12,6 +12,8 @@ import { PrismaService } from '../prisma/prisma.service';
 export class WebhookProcessor extends WorkerHost {
   private readonly logger = new Logger(WebhookProcessor.name);
   private readonly DEFAULT_WEBHOOK_SECRET = 'super-secret-merchant-key';
+  private readonly DEFAULT_WEBHOOK_URL =
+    'https://merchant.example.com/webhooks';
 
   constructor(private readonly prisma: PrismaService) {
     super();
@@ -23,22 +25,28 @@ export class WebhookProcessor extends WorkerHost {
     );
 
     const { tenantId, targetUrl: customUrl, url } = job.data || {};
-    const targetUrl =
-      (customUrl as string) ||
-      (url as string) ||
-      'https://merchant.example.com/webhooks';
 
     let secret = this.DEFAULT_WEBHOOK_SECRET;
+    let tenantWebhookUrl: string | null = null;
 
     if (tenantId) {
       const tenant = await this.prisma.tenant.findUnique({
         where: { id: tenantId as string },
-        select: { webhookSecret: true },
+        select: { webhookSecret: true, webhookUrl: true },
       });
       if (tenant?.webhookSecret) {
         secret = tenant.webhookSecret;
       }
+      if (tenant?.webhookUrl) {
+        tenantWebhookUrl = tenant.webhookUrl;
+      }
     }
+
+    const targetUrl =
+      (customUrl as string) ||
+      (url as string) ||
+      tenantWebhookUrl ||
+      this.DEFAULT_WEBHOOK_URL;
 
     const payloadString = JSON.stringify(job.data);
 
