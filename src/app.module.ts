@@ -14,6 +14,7 @@ import { SecurityModule } from './security/security.module';
 import { AuthModule } from './auth/auth.module';
 import { TenantModule } from './tenant/tenant.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
+import { AccountsModule } from './accounts/accounts.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { ApiKeysModule } from './api-keys/api-keys.module';
     AuthModule,
     TenantModule,
     ApiKeysModule,
+    AccountsModule,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],
