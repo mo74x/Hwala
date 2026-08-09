@@ -11,6 +11,7 @@ import { Scopes } from '../auth/scopes.decorator';
 import { ScopesGuard } from '../auth/scopes.guard';
 import { CurrentTenant } from '../tenant/tenant.decorator';
 import { TransferService } from './transfer.service';
+import { CreateTransferDto } from './dto/create-transfer.dto';
 
 @Controller('api/v1/transfers')
 @UseGuards(ApiKeyGuard, ScopesGuard)
@@ -23,17 +24,14 @@ export class TransferController {
   @UseInterceptors(IdempotencyInterceptor)
   async createTransfer(
     @CurrentTenant() tenantId: string,
-    @Body('senderId') senderId: string,
-    @Body('receiverId') receiverId: string,
-    @Body('amount') amount: number,
-    @Body('description') description: string,
+    @Body() dto: CreateTransferDto,
   ) {
     return this.transferService.executeTransfer(
       tenantId,
-      senderId,
-      receiverId,
-      amount,
-      description,
+      dto.senderId,
+      dto.receiverId,
+      dto.amount,
+      dto.description,
     );
   }
 }

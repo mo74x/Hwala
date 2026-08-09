@@ -4,7 +4,7 @@ import { ApiKeyGuard } from '../auth/api-key.guard';
 import { Scopes } from '../auth/scopes.decorator';
 import { ScopesGuard } from '../auth/scopes.guard';
 import { CurrentTenant } from '../tenant/tenant.decorator';
-import type { AccountType } from '../../generated/prisma/client.js';
+import { CreateAccountDto } from './dto/create-account.dto';
 
 @Controller('accounts')
 @UseGuards(ApiKeyGuard, ScopesGuard)
@@ -15,15 +15,13 @@ export class AccountsController {
   @Scopes('write:accounts')
   async createAccount(
     @CurrentTenant() tenantId: string,
-    @Body('userId') userId: string,
-    @Body('type') type: AccountType,
-    @Body('initialBalance') initialBalance?: number,
+    @Body() dto: CreateAccountDto,
   ) {
     return this.accountsService.createAccount(
       tenantId,
-      userId,
-      type,
-      initialBalance,
+      dto.userId,
+      dto.type,
+      dto.initialBalance,
     );
   }
 

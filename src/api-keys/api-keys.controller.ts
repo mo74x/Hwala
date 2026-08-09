@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
-
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import {
   Body,
   Controller,
@@ -12,6 +12,7 @@ import {
 import { ApiKeysService } from './api-keys.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentTenant } from '../tenant/tenant.decorator';
+import { CreateApiKeyDto } from './dto/create-api-key.dto';
 
 @Controller('api-keys')
 @UseGuards(JwtAuthGuard)
@@ -21,10 +22,9 @@ export class ApiKeysController {
   @Post()
   async createApiKey(
     @CurrentTenant() tenantId: string,
-    @Body('name') name: string,
-    @Body('scopes') scopes?: string[],
+    @Body() dto: CreateApiKeyDto,
   ) {
-    return this.apiKeysService.createApiKey(tenantId, name, scopes);
+    return this.apiKeysService.createApiKey(tenantId, dto.name, dto.scopes);
   }
 
   @Get()
