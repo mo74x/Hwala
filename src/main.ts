@@ -1,13 +1,27 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Apply security HTTP headers using Helmet
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: [`'self'`],
+          styleSrc: [`'self'`, `'unsafe-inline'`],
+          imgSrc: [`'self'`, 'data:', 'validator.swagger.io'],
+          scriptSrc: [`'self'`, `'unsafe-inline'`, `'unsafe-eval'`],
+        },
+      },
+    }),
+  );
 
   // Enable global DTO validation with strict payload filtering and type transformation
   app.useGlobalPipes(
@@ -17,6 +31,31 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
+
+  // Configure explicit CORS origins for production and development
+  const rawCorsOrigins = process.env.CORS_ORIGIN;
+  const allowedOrigins = rawCorsOrigins
+    ? rawCorsOrigins.split(',').map((origin) => origin.trim())
+    : process.env.NODE_ENV === 'production'
+      ? false
+      : [
+          'http://localhost:3000',
+          'http://localhost:5173',
+          'http://localhost:8080',
+        ];
+
+  app.enableCors({
+    origin: allowedOrigins,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Accept',
+      'Authorization',
+      'x-api-key',
+      'x-tenant-id',
+    ],
+    credentials: true,
+  });
 
   // Configure OpenAPI / Swagger documentation
   const config = new DocumentBuilder()
