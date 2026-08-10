@@ -11,9 +11,6 @@ import { PrismaService } from '../prisma/prisma.service';
 @Processor('webhook_queue')
 export class WebhookProcessor extends WorkerHost {
   private readonly logger = new Logger(WebhookProcessor.name);
-  private readonly DEFAULT_WEBHOOK_SECRET = 'super-secret-merchant-key';
-  private readonly DEFAULT_WEBHOOK_URL =
-    'https://merchant.example.com/webhooks';
 
   constructor(private readonly prisma: PrismaService) {
     super();
@@ -21,12 +18,12 @@ export class WebhookProcessor extends WorkerHost {
 
   async process(job: Job): Promise<any> {
     this.logger.log(
-      `Attempt ${job.attemptsMade + 1}: Dispatching webhook for Tx ${job.data.transactionId}`,
+      `Attempt ${job.attemptsMade + 1}: Dispatching webhook for Tx ${job.data?.transactionId}`,
     );
 
     const { tenantId, targetUrl: customUrl, url } = job.data || {};
 
-    let secret = this.DEFAULT_WEBHOOK_SECRET;
+    let secret = '';
     let tenantWebhookUrl: string | null = null;
 
     if (tenantId) {
@@ -43,10 +40,18 @@ export class WebhookProcessor extends WorkerHost {
     }
 
     const targetUrl =
-      (customUrl as string) ||
-      (url as string) ||
-      tenantWebhookUrl ||
-      this.DEFAULT_WEBHOOK_URL;
+      (customUrl as string) || (url as string) || tenantWebhookUrl;
+
+    if (!targetUrl) {
+      this.logger.warn(
+        `Skipping webhook delivery for Tx ${job.data?.transactionId}: No webhook URL configured for tenant ${tenantId || 'unknown'}`,
+      );
+      return {
+        delivered: false,
+        skipped: true,
+        reason: 'No webhook URL configured',
+      };
+    }
 
     const payloadString = JSON.stringify(job.data);
 

@@ -9,6 +9,9 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Enable graceful shutdown hooks for SIGTERM / SIGINT signals
+  app.enableShutdownHooks();
+
   // Apply security HTTP headers using Helmet
   app.use(
     helmet({

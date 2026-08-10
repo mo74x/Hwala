@@ -44,8 +44,10 @@ describe('WebhookProcessor', () => {
 
   it('should compute X-Signature with tenant webhookSecret when present', async () => {
     const tenantSecret = 'custom-tenant-secret-123';
+    const tenantUrl = 'https://merchant.example.com/webhooks';
     prismaService.tenant.findUnique.mockResolvedValue({
       webhookSecret: tenantSecret,
+      webhookUrl: tenantUrl,
     });
 
     const jobData = {
@@ -70,10 +72,10 @@ describe('WebhookProcessor', () => {
     });
     expect(result.delivered).toBe(true);
     expect(result.signature).toBe(expectedSignature);
-    expect(result.targetUrl).toBe('https://merchant.example.com/webhooks');
+    expect(result.targetUrl).toBe(tenantUrl);
   });
 
-  it('should fallback to default secret when tenant has no webhookSecret', async () => {
+  it('should skip delivery when no webhookUrl is configured for tenant or job', async () => {
     prismaService.tenant.findUnique.mockResolvedValue({
       webhookSecret: null,
       webhookUrl: null,
@@ -86,18 +88,11 @@ describe('WebhookProcessor', () => {
     };
     const job = { attemptsMade: 0, data: jobData } as Job;
 
-    const payloadString = JSON.stringify(jobData);
-    const expectedHmac = crypto
-      .createHmac('sha256', 'super-secret-merchant-key')
-      .update(payloadString)
-      .digest('hex');
-    const expectedSignature = `sha256=${expectedHmac}`;
-
     const result = await processor.process(job);
 
-    expect(result.delivered).toBe(true);
-    expect(result.signature).toBe(expectedSignature);
-    expect(result.targetUrl).toBe('https://merchant.example.com/webhooks');
+    expect(result.delivered).toBe(false);
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toBe('No webhook URL configured');
   });
 
   it('should use tenant webhookUrl when present in tenant configuration', async () => {
