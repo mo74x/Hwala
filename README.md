@@ -1,98 +1,184 @@
 <p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
+  <h1 align="center">💸 Hwala </h1>
+  <p align="center">
+    <b>Enterprise-grade, Multi-Tenant Digital Wallet & Financial Ledger Engine</b>
+  </p>
+  <p align="center">
+    Built with NestJS 11, Prisma 7, PostgreSQL, Redis, and BullMQ.
+  </p>
 </p>
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+---
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 📌 Overview
 
-## Description
+**Hwala Core** is a multi-tenant financial transaction engine and double-entry ledger platform designed for scale, fault tolerance, and absolute financial consistency. It handles account management, funds transfers with strict transactional locks, rate-limiting velocity checks, API key / JWT authentication, and asynchronous webhook dispatching via BullMQ worker queues.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+---
 
-## Project setup
+## ⚡ Current Specifications & Technology Stack
 
-```bash
-$ npm install
+| Layer | Technology / Tool | Description |
+| :--- | :--- | :--- |
+| **Framework** | **NestJS 11** | Progressive Node.js TypeScript framework with modular architecture |
+| **Database** | **PostgreSQL** | Primary relational datastore for ledger integrity and accounts |
+| **ORM** | **Prisma 7** (`@prisma/client` + `@prisma/adapter-pg`) | Type-safe database client using PostgreSQL native driver adapters |
+| **Caching & Queues** | **Redis** + **BullMQ** (`@nestjs/bullmq`, `ioredis`) | Asynchronous background processing, rate limiting, and velocity limits |
+| **Authentication** | **JWT & API Key** (`passport-jwt`, custom Guards) | Dual-mode auth with scoped permissions (`scopes`) and tenant isolation |
+| **Security** | **Helmet**, **Class Validator**, **Rate Limiter** | Production security headers, DTO validation pipes, and Redis throttlers |
+| **API Docs** | **Swagger / OpenAPI** (`@nestjs/swagger`) | Interactive REST API documentation at `/api/docs` |
+| **Health Checks** | **NestJS Terminus** (`@nestjs/terminus`) | Health monitoring at `/health` for DB and Redis status |
+
+---
+
+## 🔑 Core Features & Architectural Highlights
+
+* 🏢 **Multi-Tenancy Isolation (`Tenant`):**
+  * Every account, ledger entry, and API key belongs to a specific `tenantId`.
+  * Middleware and Guards enforce cross-tenant data isolation.
+
+* ⚖️ **Double-Entry Ledger Engine:**
+  * Transfers generate strictly balanced `LedgerEntry` pairs (Debit `-amount` and Credit `+amount`) referencing a single `transactionId`.
+  * Optimistic versioning (`version` field) and explicit row-level database locking (`FOR UPDATE`) prevent race conditions and double-spending.
+
+* 🔒 **Deadlock Prevention:**
+  * Row-locking order is deterministically sorted by account UUID (`[senderId, receiverId].sort()`), eliminating database deadlocks during high-concurrency transfers.
+
+* 🚀 **Velocity Limits & Redis Throttling:**
+  * Dynamic velocity limits (e.g., max transfers per minute per account) enforced in Redis *before* acquiring heavy database transaction locks.
+
+* 🔐 **Fine-Grained Scopes & Roles:**
+  * Support for roles (`ADMIN`, `SUPPORT`, `API_USER`) and explicit permission scopes (e.g., `['read:ledgers', 'write:ledgers']`) via custom NestJS guards (`@Scopes()`, `@Roles()`).
+
+* 📩 **Resilient Webhook Dispatcher:**
+  * Background worker queue (`BullMQ`) dispatches event notifications (e.g., `transfer.completed`) to merchant `webhookUrl` endpoints with exponential backoff retries.
+
+---
+
+## 🗄️ Database Domain Model
+
+```mermaid
+erDiagram
+    Tenant ||--o{ User : "has"
+    Tenant ||--o{ ApiKey : "owns"
+    Tenant ||--o{ Account : "manages"
+    Tenant ||--o{ LedgerEntry : "contains"
+    Account ||--o{ LedgerEntry : "has history"
+
+    Tenant {
+        uuid id PK
+        string name
+        string webhookUrl
+        string webhookSecret
+    }
+
+    User {
+        uuid id PK
+        uuid tenantId FK
+        string email
+        enum role "ADMIN | SUPPORT | API_USER"
+    }
+
+    ApiKey {
+        uuid id PK
+        uuid tenantId FK
+        string name
+        string keyHash
+        string[] scopes
+    }
+
+    Account {
+        uuid id PK
+        uuid tenantId FK
+        uuid userId
+        enum type "WALLET | MERCHANT_PAYABLE | PLATFORM_REVENUE"
+        decimal balance
+        int version
+    }
+
+    LedgerEntry {
+        uuid id PK
+        uuid tenantId FK
+        uuid transactionId
+        uuid accountId FK
+        decimal amount
+        string description
+    }
 ```
 
-## Compile and run the project
+---
+
+## 🚀 Environment Variables (`.env`)
+
+| Variable | Default Value | Description |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | `postgresql://postgres@localhost:5432/hawala_db` | PostgreSQL connection string |
+| `REDIS_HOST` | `localhost` | Redis server hostname |
+| `REDIS_PORT` | `6379` | Redis server port |
+| `REDIS_PASSWORD` | `""` | Redis authentication password (optional) |
+| `JWT_SECRET` | *(required)* | 256-bit secret key for signing JWT tokens |
+| `THROTTLE_TTL` | `60000` | Rate limit window in milliseconds (1 minute) |
+| `THROTTLE_LIMIT` | `100` | Max allowed API calls per rate limit window |
+| `PORT` | `3000` | HTTP application listening port |
+| `CORS_ORIGIN` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins |
+
+---
+
+## 🌐 API Reference Overview
+
+Interactive Swagger documentation is available at **`http://localhost:3000/api/docs`**.
+
+### Key Routes
+
+| Method | Endpoint | Auth Required | Description |
+| :--- | :--- | :--- | :--- |
+| **GET** | `/health` | None | System health check (DB & Redis status) |
+| **POST** | `/auth/register` | Admin / Internal | Register a new user |
+| **POST** | `/auth/login` | None | Authenticate user & retrieve JWT token |
+| **POST** | `/accounts` | JWT / API Key | Create a new financial account (`WALLET`, etc.) |
+| **GET** | `/accounts/:id` | JWT / API Key | Fetch account balance and metadata |
+| **POST** | `/transfers` | JWT / API Key (`write:ledgers`) | Execute a funds transfer between accounts |
+| **POST** | `/api-keys` | JWT (`ADMIN`) | Generate scoped API key for tenant integration |
+
+---
+
+## 🛠️ Local Development & Setup
+
+### Prerequisites
+
+- **Node.js**: `v20+`
+- **Docker & Docker Compose** (for local PostgreSQL and Redis)
+
+### Installation
 
 ```bash
-# development
-$ npm run start
+# 1. Install project dependencies
+npm install
 
-# watch mode
-$ npm run start:dev
+# 2. Start PostgreSQL and Redis via Docker Compose
+docker-compose up -d
 
-# production mode
-$ npm run start:prod
+# 3. Copy environment variables
+cp .env.example .env
+
+# 4. Run Prisma database migrations and client generation
+npx prisma db push
+npx prisma generate
+
+# 5. Start the application in development mode
+npm run start:dev
 ```
 
-## Run tests
+### Running Tests
 
 ```bash
-# unit tests
-$ npm run test
+# Unit tests
+npm run test
 
-# e2e tests
-$ npm run test:e2e
+# End-to-end tests
+npm run test:e2e
 
-# test coverage
-$ npm run test:cov
+# Test coverage
+npm run test:cov
 ```
 
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
