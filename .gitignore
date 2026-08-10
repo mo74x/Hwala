@@ -8,6 +8,7 @@
 .claude
 .windsurf
 skills-lock.json
+implementation_plan.md
 
 # generated code
 /generated
@@ -54,6 +55,7 @@ lerna-debug.log*
 # temp directory
 .temp
 .tmp
+
 
 # Runtime data
 pids

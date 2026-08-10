@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { BullModule } from '@nestjs/bullmq';
@@ -17,10 +18,12 @@ import { TenantModule } from './tenant/tenant.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { HealthModule } from './health/health.module';
+import { ReconciliationModule } from './reconciliation/reconciliation.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     RedisModule,
     HealthModule,
@@ -64,6 +67,7 @@ import { HealthModule } from './health/health.module';
     TenantModule,
     ApiKeysModule,
     AccountsModule,
+    ReconciliationModule,
   ],
   controllers: [AppController],
   providers: [
