@@ -20,18 +20,54 @@ enum Role {
   API_USER
 }
 
+enum LedgerEntryType {
+  TRANSFER
+  FEE
+  HOLD
+  RELEASE
+  REFUND
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum RiskSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RiskStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  DISMISSED
+}
+
 model Tenant {
   id            String   @id @default(uuid()) @db.Uuid
   name          String
   webhookSecret String?
   webhookUrl    String?
+  baseCurrency  String   @default("USD")
+  feeFixed      Decimal  @default(0.00) @db.Decimal(12, 2)
+  feePercentage Decimal  @default(0.00) @db.Decimal(5, 4)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  users         User[]
-  apiKeys       ApiKey[]
-  accounts      Account[]
-  ledgerEntries LedgerEntry[]
+  users           User[]
+  apiKeys         ApiKey[]
+  accounts        Account[]
+  ledgerEntries   LedgerEntry[]
+  webhookOutboxes WebhookOutbox[]
+  webhookFailures WebhookFailure[]
+  auditLogs       AuditLog[]
+  riskFlags       RiskFlag[]
 }
 
 model User {
@@ -63,29 +99,37 @@ model ApiKey {
 }
 
 model Account {
-  id        String      @id @default(uuid()) @db.Uuid
-  tenantId  String      @db.Uuid
-  userId    String      @db.Uuid // Optional or required depending on logic, linking to User if it's a specific user's account
-  type      AccountType
-  balance   Decimal     @default(0.00) @db.Decimal(12, 2)
-  version   Int         @default(1)
-  updatedAt DateTime    @updatedAt
-  createdAt DateTime    @default(now())
+  id          String      @id @default(uuid()) @db.Uuid
+  tenantId    String      @db.Uuid
+  userId      String      @db.Uuid // Optional or required depending on logic
+  type        AccountType
+  currency    String      @default("USD")
+  balance     Decimal     @default(0.00) @db.Decimal(12, 2)
+  holdBalance Decimal     @default(0.00) @db.Decimal(12, 2)
+  version     Int         @default(1)
+  updatedAt   DateTime    @updatedAt
+  createdAt   DateTime    @default(now())
 
-  tenant  Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  entries LedgerEntry[]
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  entries   LedgerEntry[]
+  riskFlags RiskFlag[]
 
   @@index([tenantId])
 }
 
 model LedgerEntry {
-  id            String   @id @default(uuid()) @db.Uuid
-  tenantId      String   @db.Uuid
-  transactionId String   @db.Uuid
-  accountId     String   @db.Uuid
-  amount        Decimal  @db.Decimal(12, 2)
-  description   String
-  createdAt     DateTime @default(now())
+  id             String          @id @default(uuid()) @db.Uuid
+  tenantId       String          @db.Uuid
+  transactionId  String          @db.Uuid
+  accountId      String          @db.Uuid
+  amount         Decimal         @db.Decimal(12, 2)
+  currency       String          @default("USD")
+  exchangeRate   Decimal         @default(1.000000) @db.Decimal(12, 6)
+  feeAmount      Decimal         @default(0.00) @db.Decimal(12, 2)
+  type           LedgerEntryType @default(TRANSFER)
+  idempotencyKey String?         @unique
+  description    String
+  createdAt      DateTime        @default(now())
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   account Account @relation(fields: [accountId], references: [id])
@@ -94,3 +138,66 @@ model LedgerEntry {
   @@index([accountId])
   @@index([tenantId])
 }
+
+model WebhookOutbox {
+  id        String       @id @default(uuid()) @db.Uuid
+  tenantId  String       @db.Uuid
+  eventType String
+  payload   Json
+  status    OutboxStatus @default(PENDING)
+  attempts  Int          @default(0)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+model WebhookFailure {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  eventType String
+  payload   Json
+  error     String
+  retries   Int      @default(0)
+  failedAt  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  userId    String?  @db.Uuid
+  action    String
+  targetId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([userId])
+}
+
+model RiskFlag {
+  id        String       @id @default(uuid()) @db.Uuid
+  tenantId  String       @db.Uuid
+  accountId String       @db.Uuid
+  reason    String
+  severity  RiskSeverity @default(MEDIUM)
+  status    RiskStatus   @default(OPEN)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([accountId])
+}
+

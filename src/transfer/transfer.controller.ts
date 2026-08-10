@@ -12,6 +12,9 @@ import { ScopesGuard } from '../auth/scopes.guard';
 import { CurrentTenant } from '../tenant/tenant.decorator';
 import { TransferService } from './transfer.service';
 import { CreateTransferDto } from './dto/create-transfer.dto';
+import { HoldFundsDto } from './dto/hold-funds.dto';
+import { CaptureHoldDto } from './dto/capture-hold.dto';
+import { ReleaseHoldDto } from './dto/release-hold.dto';
 
 @Controller('api/v1/transfers')
 @UseGuards(ApiKeyGuard, ScopesGuard)
@@ -32,6 +35,54 @@ export class TransferController {
       dto.receiverId,
       dto.amount,
       dto.description,
+    );
+  }
+
+  // ── Hold / Escrow Endpoints ──────────────────────────────────
+
+  @Post('holds')
+  @Scopes('write:transfers')
+  @UseInterceptors(IdempotencyInterceptor)
+  async holdFunds(
+    @CurrentTenant() tenantId: string,
+    @Body() dto: HoldFundsDto,
+  ) {
+    return this.transferService.holdFunds(
+      tenantId,
+      dto.accountId,
+      dto.amount,
+      dto.description || 'Funds held',
+    );
+  }
+
+  @Post('holds/capture')
+  @Scopes('write:transfers')
+  @UseInterceptors(IdempotencyInterceptor)
+  async captureHold(
+    @CurrentTenant() tenantId: string,
+    @Body() dto: CaptureHoldDto,
+  ) {
+    return this.transferService.captureHold(
+      tenantId,
+      dto.holdId,
+      dto.receiverId,
+      dto.amount,
+      dto.description || 'Hold captured',
+    );
+  }
+
+  @Post('holds/release')
+  @Scopes('write:transfers')
+  @UseInterceptors(IdempotencyInterceptor)
+  async releaseHold(
+    @CurrentTenant() tenantId: string,
+    @Body() dto: ReleaseHoldDto,
+  ) {
+    return this.transferService.releaseHold(
+      tenantId,
+      dto.holdId,
+      dto.amount,
+      dto.description || 'Hold released',
     );
   }
 }

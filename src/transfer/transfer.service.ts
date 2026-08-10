@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  NotFoundException,
   InternalServerErrorException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,6 +17,10 @@ export class TransferService {
     @InjectQueue('webhook_queue') private readonly webhookQueue: Queue,
     private readonly securityService: SecurityService,
   ) {}
+
+  // ────────────────────────────────────────────────────────────────
+  //  DIRECT TRANSFER (existing)
+  // ────────────────────────────────────────────────────────────────
 
   async executeTransfer(
     tenantId: string,
@@ -128,6 +133,378 @@ export class TransferService {
       if (error instanceof BadRequestException) throw error;
       throw new InternalServerErrorException(
         'Transfer failed due to a system error',
+      );
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  //  HOLD / ESCROW ENGINE
+  // ────────────────────────────────────────────────────────────────
+
+  /**
+   * Reserves funds by moving `amount` from available `balance` into `holdBalance`.
+   * Creates a HOLD ledger entry for audit trail.
+   *
+   * @returns transactionId (holdId) that must be passed to captureHold / releaseHold.
+   */
+  async holdFunds(
+    tenantId: string,
+    accountId: string,
+    amount: number,
+    description: string,
+  ) {
+    if (!tenantId)
+      throw new BadRequestException('Tenant ID is required');
+    if (amount <= 0)
+      throw new BadRequestException('Hold amount must be greater than zero');
+
+    const transactionId = randomUUID();
+
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        // Lock the account row to prevent concurrent modifications
+        await tx.$queryRaw`SELECT * FROM "Account" WHERE id = ${accountId}::uuid FOR UPDATE`;
+
+        const account = await tx.account.findUnique({
+          where: { id: accountId },
+        });
+        if (!account)
+          throw new NotFoundException('Account not found');
+        if (account.tenantId !== tenantId)
+          throw new BadRequestException(
+            'Account does not belong to this tenant',
+          );
+        if (Number(account.balance) < amount)
+          throw new BadRequestException(
+            'Insufficient available balance to place hold',
+          );
+
+        // Move funds from available balance → holdBalance
+        await tx.account.update({
+          where: { id: accountId },
+          data: {
+            balance: { decrement: amount },
+            holdBalance: { increment: amount },
+            version: { increment: 1 },
+          },
+        });
+
+        // Record a HOLD ledger entry for the audit trail
+        await tx.ledgerEntry.create({
+          data: {
+            tenantId,
+            transactionId,
+            accountId,
+            amount: -amount, // Funds are held (unavailable)
+            type: 'HOLD',
+            description: description || 'Funds held',
+          },
+        });
+
+        return {
+          holdId: transactionId,
+          accountId,
+          amount,
+          status: 'HELD',
+        };
+      });
+
+      return result;
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      )
+        throw error;
+      throw new InternalServerErrorException(
+        'Hold operation failed due to a system error',
+      );
+    }
+  }
+
+  /**
+   * Captures (finalizes) a previously held amount.
+   * Deducts the held funds from `holdBalance` on the sender and credits
+   * the `balance` on the receiver, creating TRANSFER ledger entries.
+   *
+   * @param holdId - The transactionId returned by holdFunds.
+   */
+  async captureHold(
+    tenantId: string,
+    holdId: string,
+    receiverId: string,
+    amount: number,
+    description: string,
+  ) {
+    if (!tenantId)
+      throw new BadRequestException('Tenant ID is required');
+    if (amount <= 0)
+      throw new BadRequestException('Capture amount must be greater than zero');
+
+    const transactionId = randomUUID();
+
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        // Find the original HOLD ledger entry to identify the sender account
+        const holdEntry = await tx.ledgerEntry.findFirst({
+          where: {
+            transactionId: holdId,
+            tenantId,
+            type: 'HOLD',
+          },
+        });
+        if (!holdEntry)
+          throw new NotFoundException(
+            'Hold not found. Verify the holdId and tenant.',
+          );
+
+        const senderId = holdEntry.accountId;
+
+        if (senderId === receiverId)
+          throw new BadRequestException(
+            'Cannot capture hold to the same account',
+          );
+
+        // Deterministic lock ordering to prevent deadlocks
+        const [firstId, secondId] = [senderId, receiverId].sort();
+        await tx.$queryRaw`SELECT * FROM "Account" WHERE id = ${firstId}::uuid FOR UPDATE`;
+        await tx.$queryRaw`SELECT * FROM "Account" WHERE id = ${secondId}::uuid FOR UPDATE`;
+
+        const sender = await tx.account.findUnique({
+          where: { id: senderId },
+        });
+        if (!sender)
+          throw new NotFoundException('Sender account not found');
+
+        const heldAmount = Math.abs(Number(holdEntry.amount));
+        if (amount > heldAmount)
+          throw new BadRequestException(
+            `Capture amount (${amount}) exceeds held amount (${heldAmount})`,
+          );
+
+        if (Number(sender.holdBalance) < amount)
+          throw new BadRequestException(
+            'Insufficient held balance to capture',
+          );
+
+        const receiver = await tx.account.findUnique({
+          where: { id: receiverId },
+        });
+        if (!receiver)
+          throw new NotFoundException('Receiver account not found');
+        if (receiver.tenantId !== tenantId)
+          throw new BadRequestException(
+            'Receiver account does not belong to this tenant',
+          );
+
+        // Deduct from sender's holdBalance
+        await tx.account.update({
+          where: { id: senderId },
+          data: {
+            holdBalance: { decrement: amount },
+            version: { increment: 1 },
+          },
+        });
+
+        // Credit receiver's available balance
+        await tx.account.update({
+          where: { id: receiverId },
+          data: {
+            balance: { increment: amount },
+            version: { increment: 1 },
+          },
+        });
+
+        // If partial capture, release the remainder back to sender's balance
+        const remainder = heldAmount - amount;
+        if (remainder > 0) {
+          await tx.account.update({
+            where: { id: senderId },
+            data: {
+              holdBalance: { decrement: remainder },
+              balance: { increment: remainder },
+              version: { increment: 1 },
+            },
+          });
+
+          // Record a RELEASE entry for the partial remainder
+          await tx.ledgerEntry.create({
+            data: {
+              tenantId,
+              transactionId,
+              accountId: senderId,
+              amount: remainder,
+              type: 'RELEASE',
+              description: `Partial hold release (remainder of hold ${holdId})`,
+            },
+          });
+        }
+
+        // Double-entry ledger records for the captured transfer
+        await tx.ledgerEntry.createMany({
+          data: [
+            {
+              tenantId,
+              transactionId,
+              accountId: senderId,
+              amount: -amount, // Debit
+              type: 'TRANSFER',
+              description:
+                description || `Capture of hold ${holdId}`,
+            },
+            {
+              tenantId,
+              transactionId,
+              accountId: receiverId,
+              amount: amount, // Credit
+              type: 'TRANSFER',
+              description:
+                description || `Capture of hold ${holdId}`,
+            },
+          ],
+        });
+
+        return {
+          transactionId,
+          holdId,
+          senderId,
+          receiverId,
+          capturedAmount: amount,
+          releasedRemainder: remainder,
+          status: 'CAPTURED',
+        };
+      });
+
+      // Dispatch webhook notification for the captured transfer
+      await this.webhookQueue.add(
+        'hold.captured',
+        {
+          tenantId,
+          transactionId: result.transactionId,
+          holdId: result.holdId,
+          senderId: result.senderId,
+          receiverId: result.receiverId,
+          capturedAmount: result.capturedAmount,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          attempts: 5,
+          backoff: { type: 'exponential', delay: 2000 },
+          removeOnComplete: true,
+        },
+      );
+
+      return result;
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      )
+        throw error;
+      throw new InternalServerErrorException(
+        'Capture operation failed due to a system error',
+      );
+    }
+  }
+
+  /**
+   * Releases (voids) a previously held amount back to the account's
+   * available `balance`. Creates a RELEASE ledger entry.
+   *
+   * @param holdId - The transactionId returned by holdFunds.
+   */
+  async releaseHold(
+    tenantId: string,
+    holdId: string,
+    amount: number,
+    description: string,
+  ) {
+    if (!tenantId)
+      throw new BadRequestException('Tenant ID is required');
+    if (amount <= 0)
+      throw new BadRequestException(
+        'Release amount must be greater than zero',
+      );
+
+    const transactionId = randomUUID();
+
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        // Find the original HOLD ledger entry
+        const holdEntry = await tx.ledgerEntry.findFirst({
+          where: {
+            transactionId: holdId,
+            tenantId,
+            type: 'HOLD',
+          },
+        });
+        if (!holdEntry)
+          throw new NotFoundException(
+            'Hold not found. Verify the holdId and tenant.',
+          );
+
+        const accountId = holdEntry.accountId;
+
+        // Lock the account row
+        await tx.$queryRaw`SELECT * FROM "Account" WHERE id = ${accountId}::uuid FOR UPDATE`;
+
+        const account = await tx.account.findUnique({
+          where: { id: accountId },
+        });
+        if (!account)
+          throw new NotFoundException('Account not found');
+
+        const heldAmount = Math.abs(Number(holdEntry.amount));
+        if (amount > heldAmount)
+          throw new BadRequestException(
+            `Release amount (${amount}) exceeds held amount (${heldAmount})`,
+          );
+
+        if (Number(account.holdBalance) < amount)
+          throw new BadRequestException(
+            'Insufficient held balance to release',
+          );
+
+        // Move funds back: holdBalance → balance
+        await tx.account.update({
+          where: { id: accountId },
+          data: {
+            holdBalance: { decrement: amount },
+            balance: { increment: amount },
+            version: { increment: 1 },
+          },
+        });
+
+        // Record a RELEASE ledger entry
+        await tx.ledgerEntry.create({
+          data: {
+            tenantId,
+            transactionId,
+            accountId,
+            amount: amount, // Funds returned to available
+            type: 'RELEASE',
+            description: description || `Release of hold ${holdId}`,
+          },
+        });
+
+        return {
+          transactionId,
+          holdId,
+          accountId,
+          releasedAmount: amount,
+          status: 'RELEASED',
+        };
+      });
+
+      return result;
+    } catch (error) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof NotFoundException
+      )
+        throw error;
+      throw new InternalServerErrorException(
+        'Release operation failed due to a system error',
       );
     }
   }
