@@ -19,6 +19,7 @@ import { ApiKeysModule } from './api-keys/api-keys.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { HealthModule } from './health/health.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
+import { ExchangeModule } from './exchange/exchange.module';
 
 @Module({
   imports: [
@@ -27,6 +28,8 @@ import { ReconciliationModule } from './reconciliation/reconciliation.module';
     PrismaModule,
     RedisModule,
     HealthModule,
+    ExchangeModule,
+
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule, RedisModule],
       inject: [ConfigService, RedisService],
