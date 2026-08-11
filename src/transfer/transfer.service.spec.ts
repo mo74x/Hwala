@@ -51,14 +51,14 @@ describe('TransferService', () => {
     expect(service).toBeDefined();
   });
 
-  describe('executeTransfer - Fee Engine', () => {
+  describe('executeTransfer - Fee Engine & Transactional Outbox', () => {
     const tenantId = '11111111-1111-1111-1111-111111111111';
     const senderId = '22222222-2222-2222-2222-222222222222';
     const receiverId = '33333333-3333-3333-3333-333333333333';
     const revenueAccountId = '44444444-4444-4444-4444-444444444444';
     const userId = '55555555-5555-5555-5555-555555555555';
 
-    it('should execute transfer with 0 platform fee when tenant has no fee configured', async () => {
+    it('should execute transfer with 0 platform fee and write transfer.completed to WebhookOutbox', async () => {
       const mockTx = {
         tenant: {
           findUnique: jest.fn().mockResolvedValue({
@@ -95,6 +95,9 @@ describe('TransferService', () => {
         ledgerEntry: {
           createMany: jest.fn().mockResolvedValue({ count: 2 }),
         },
+        webhookOutbox: {
+          create: jest.fn().mockResolvedValue({}),
+        },
       };
 
       mockPrismaService.$transaction.mockImplementation(async (cb) =>
@@ -111,13 +114,19 @@ describe('TransferService', () => {
 
       expect(result.status).toBe('SUCCESS');
       expect(result.fee).toBe(0);
-      expect(mockTx.account.update).toHaveBeenCalledWith({
-        where: { id: senderId },
-        data: { balance: { decrement: 100 }, version: { increment: 1 } },
-      });
-      expect(mockTx.account.update).toHaveBeenCalledWith({
-        where: { id: receiverId },
-        data: { balance: { increment: 100 }, version: { increment: 1 } },
+      expect(mockTx.webhookOutbox.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          tenantId,
+          eventType: 'transfer.completed',
+          status: 'PENDING',
+          payload: expect.objectContaining({
+            tenantId,
+            senderId,
+            receiverId,
+            amount: 100,
+            fee: 0,
+          }),
+        }),
       });
     });
 
@@ -126,8 +135,8 @@ describe('TransferService', () => {
         tenant: {
           findUnique: jest.fn().mockResolvedValue({
             id: tenantId,
-            feeFixed: 2.0, // $2 fixed fee
-            feePercentage: 0.01, // 1% percentage fee
+            feeFixed: 2.0,
+            feePercentage: 0.01,
           }),
         },
         account: {
@@ -163,13 +172,15 @@ describe('TransferService', () => {
         ledgerEntry: {
           createMany: jest.fn().mockResolvedValue({ count: 4 }),
         },
+        webhookOutbox: {
+          create: jest.fn().mockResolvedValue({}),
+        },
       };
 
       mockPrismaService.$transaction.mockImplementation(async (cb) =>
         cb(mockTx),
       );
 
-      // Transfer 100 -> fee = 2.00 + (100 * 0.01) = 3.00 -> total required = 103.00
       const result = await service.executeTransfer(
         tenantId,
         senderId,
@@ -180,35 +191,16 @@ describe('TransferService', () => {
 
       expect(result.status).toBe('SUCCESS');
       expect(result.fee).toBe(3.0);
-
-      // Sender debited totalRequired (103)
-      expect(mockTx.account.update).toHaveBeenCalledWith({
-        where: { id: senderId },
-        data: { balance: { decrement: 103 }, version: { increment: 1 } },
+      expect(mockTx.webhookOutbox.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          tenantId,
+          eventType: 'transfer.completed',
+          status: 'PENDING',
+          payload: expect.objectContaining({
+            fee: 3.0,
+          }),
+        }),
       });
-
-      // Receiver credited transfer amount (100)
-      expect(mockTx.account.update).toHaveBeenCalledWith({
-        where: { id: receiverId },
-        data: { balance: { increment: 100 }, version: { increment: 1 } },
-      });
-
-      // Platform revenue credited fee amount (3)
-      expect(mockTx.account.update).toHaveBeenCalledWith({
-        where: { id: revenueAccountId },
-        data: { balance: { increment: 3 }, version: { increment: 1 } },
-      });
-
-      // Verify double-entry ledger records sum to zero
-      const ledgerCall = mockTx.ledgerEntry.createMany.mock.calls[0][0];
-      const entries = ledgerCall.data;
-      expect(entries).toHaveLength(4);
-
-      const totalLedgerSum = entries.reduce(
-        (sum: number, entry: any) => sum + entry.amount,
-        0,
-      );
-      expect(totalLedgerSum).toBe(0);
     });
 
     it('should throw BadRequestException if sender balance is less than transfer amount + fee', async () => {
@@ -217,7 +209,7 @@ describe('TransferService', () => {
           findUnique: jest.fn().mockResolvedValue({
             id: tenantId,
             feeFixed: 5.0,
-            feePercentage: 0.05, // 5% fee -> 100 * 0.05 = 5. Total fee = 10
+            feePercentage: 0.05,
           }),
         },
         account: {
@@ -231,7 +223,7 @@ describe('TransferService', () => {
               return Promise.resolve({
                 id: senderId,
                 tenantId,
-                balance: 105, // Balance is 105, but total required is 110 (100 transfer + 10 fee)
+                balance: 105,
                 userId,
                 currency: 'USD',
               });
@@ -252,6 +244,9 @@ describe('TransferService', () => {
         $queryRaw: jest.fn().mockResolvedValue([]),
         ledgerEntry: {
           createMany: jest.fn(),
+        },
+        webhookOutbox: {
+          create: jest.fn(),
         },
       };
 

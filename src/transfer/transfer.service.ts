@@ -4,6 +4,7 @@ import {
   BadRequestException,
   NotFoundException,
   InternalServerErrorException,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { randomUUID } from 'crypto';
@@ -15,12 +16,14 @@ import { SecurityService } from '../security/security.service';
 export class TransferService {
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue('webhook_queue') private readonly webhookQueue: Queue,
-    private readonly securityService: SecurityService,
+    @Optional()
+    @InjectQueue('webhook_queue')
+    private readonly webhookQueue?: Queue,
+    private readonly securityService?: SecurityService,
   ) {}
 
   // ────────────────────────────────────────────────────────────────
-  //  DIRECT TRANSFER (existing)
+  //  DIRECT TRANSFER
   // ────────────────────────────────────────────────────────────────
 
   async executeTransfer(
@@ -39,13 +42,15 @@ export class TransferService {
     if (senderId === receiverId)
       throw new BadRequestException('Cannot transfer to the same account');
 
-    // Check velocity limits BEFORE starting the expensive DB transaction
-    await this.securityService.enforceTransferVelocity(senderId);
+    // Check velocity limits BEFORE starting the DB transaction if security service is present
+    if (this.securityService) {
+      await this.securityService.enforceTransferVelocity(senderId);
+    }
 
     const transactionId = randomUUID();
 
     try {
-      // Everything succeeds or everything rolls back
+      // Everything succeeds or everything rolls back atomically
       const result = await this.prisma.$transaction(async (tx) => {
         // Fetch Tenant fee configuration
         const tenant = await tx.tenant.findUnique({ where: { id: tenantId } });
@@ -121,7 +126,7 @@ export class TransferService {
             'Receiver account does not belong to this tenant',
           );
 
-        // Update Balances
+        // 1. Update Balances
         await tx.account.update({
           where: { id: senderId },
           data: {
@@ -145,7 +150,7 @@ export class TransferService {
           });
         }
 
-        // Create Double-Entry Ledger Records
+        // 2. Create Double-Entry Ledger Records
         const ledgerEntriesData: Array<{
           tenantId: string;
           transactionId: string;
@@ -200,30 +205,26 @@ export class TransferService {
           data: ledgerEntriesData,
         });
 
+        // 3. Transactional Outbox: Persist webhook event atomically inside the same DB transaction
+        await tx.webhookOutbox.create({
+          data: {
+            tenantId,
+            eventType: 'transfer.completed',
+            payload: {
+              tenantId,
+              transactionId,
+              senderId,
+              receiverId,
+              amount,
+              fee: totalFee,
+              timestamp: new Date().toISOString(),
+            },
+            status: 'PENDING',
+          },
+        });
+
         return { transactionId, fee: totalFee, status: 'SUCCESS' };
       });
-
-      // Dispatch background job outside of the database transaction
-      await this.webhookQueue.add(
-        'transfer.completed',
-        {
-          tenantId,
-          transactionId: result.transactionId,
-          senderId,
-          receiverId,
-          amount,
-          fee: result.fee,
-          timestamp: new Date().toISOString(),
-        },
-        {
-          attempts: 5,
-          backoff: {
-            type: 'exponential',
-            delay: 2000,
-          },
-          removeOnComplete: true,
-        },
-      );
 
       return result;
     } catch (error) {
@@ -240,7 +241,7 @@ export class TransferService {
 
   /**
    * Reserves funds by moving `amount` from available `balance` into `holdBalance`.
-   * Creates a HOLD ledger entry for audit trail.
+   * Creates a HOLD ledger entry and writes `hold.created` to WebhookOutbox.
    *
    * @returns transactionId (holdId) that must be passed to captureHold / releaseHold.
    */
@@ -290,9 +291,25 @@ export class TransferService {
             tenantId,
             transactionId,
             accountId,
-            amount: -amount, // Funds are held (unavailable)
+            amount: -amount,
             type: 'HOLD',
             description: description || 'Funds held',
+          },
+        });
+
+        // Transactional Outbox: Record hold.created event in WebhookOutbox
+        await tx.webhookOutbox.create({
+          data: {
+            tenantId,
+            eventType: 'hold.created',
+            payload: {
+              tenantId,
+              transactionId,
+              accountId,
+              amount,
+              timestamp: new Date().toISOString(),
+            },
+            status: 'PENDING',
           },
         });
 
@@ -320,7 +337,7 @@ export class TransferService {
   /**
    * Captures (finalizes) a previously held amount.
    * Deducts the held funds from `holdBalance` on the sender and credits
-   * the `balance` on the receiver, creating TRANSFER ledger entries.
+   * the `balance` on the receiver, creating TRANSFER ledger entries and writing `hold.captured` to WebhookOutbox.
    *
    * @param holdId - The transactionId returned by holdFunds.
    */
@@ -438,7 +455,7 @@ export class TransferService {
               tenantId,
               transactionId,
               accountId: senderId,
-              amount: -amount, // Debit
+              amount: -amount,
               type: 'TRANSFER',
               description: description || `Capture of hold ${holdId}`,
             },
@@ -446,11 +463,30 @@ export class TransferService {
               tenantId,
               transactionId,
               accountId: receiverId,
-              amount: amount, // Credit
+              amount: amount,
               type: 'TRANSFER',
               description: description || `Capture of hold ${holdId}`,
             },
           ],
+        });
+
+        // Transactional Outbox: Record hold.captured event in WebhookOutbox
+        await tx.webhookOutbox.create({
+          data: {
+            tenantId,
+            eventType: 'hold.captured',
+            payload: {
+              tenantId,
+              transactionId,
+              holdId,
+              senderId,
+              receiverId,
+              capturedAmount: amount,
+              releasedRemainder: remainder,
+              timestamp: new Date().toISOString(),
+            },
+            status: 'PENDING',
+          },
         });
 
         return {
@@ -463,25 +499,6 @@ export class TransferService {
           status: 'CAPTURED',
         };
       });
-
-      // Dispatch webhook notification for the captured transfer
-      await this.webhookQueue.add(
-        'hold.captured',
-        {
-          tenantId,
-          transactionId: result.transactionId,
-          holdId: result.holdId,
-          senderId: result.senderId,
-          receiverId: result.receiverId,
-          capturedAmount: result.capturedAmount,
-          timestamp: new Date().toISOString(),
-        },
-        {
-          attempts: 5,
-          backoff: { type: 'exponential', delay: 2000 },
-          removeOnComplete: true,
-        },
-      );
 
       return result;
     } catch (error) {
@@ -498,7 +515,7 @@ export class TransferService {
 
   /**
    * Releases (voids) a previously held amount back to the account's
-   * available `balance`. Creates a RELEASE ledger entry.
+   * available `balance`. Creates a RELEASE ledger entry and writes `hold.released` to WebhookOutbox.
    *
    * @param holdId - The transactionId returned by holdFunds.
    */
@@ -564,9 +581,26 @@ export class TransferService {
             tenantId,
             transactionId,
             accountId,
-            amount: amount, // Funds returned to available
+            amount: amount,
             type: 'RELEASE',
             description: description || `Release of hold ${holdId}`,
+          },
+        });
+
+        // Transactional Outbox: Record hold.released event in WebhookOutbox
+        await tx.webhookOutbox.create({
+          data: {
+            tenantId,
+            eventType: 'hold.released',
+            payload: {
+              tenantId,
+              transactionId,
+              holdId,
+              accountId,
+              releasedAmount: amount,
+              timestamp: new Date().toISOString(),
+            },
+            status: 'PENDING',
           },
         });
 

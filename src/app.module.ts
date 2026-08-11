@@ -20,6 +20,7 @@ import { AccountsModule } from './accounts/accounts.module';
 import { HealthModule } from './health/health.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { ExchangeModule } from './exchange/exchange.module';
+import { WebhookModule } from './webhook/webhook.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ExchangeModule } from './exchange/exchange.module';
     RedisModule,
     HealthModule,
     ExchangeModule,
+    WebhookModule,
 
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule, RedisModule],
