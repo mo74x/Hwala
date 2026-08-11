@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/restrict-template-expressions */
 import {
   Injectable,
   BadRequestException,
@@ -42,25 +43,73 @@ export class TransferService {
     await this.securityService.enforceTransferVelocity(senderId);
 
     const transactionId = randomUUID();
-    //Always lock rows in a consistent order (Deadlock Prevention)
-    const [firstId, secondId] = [senderId, receiverId].sort();
 
     try {
-      //Everything succeeds or everything rolls back
+      // Everything succeeds or everything rolls back
       const result = await this.prisma.$transaction(async (tx) => {
-        //Lock the rows so no other request can touch them until we commit
-        await tx.$queryRaw`SELECT * FROM "Account" WHERE id = ${firstId}::uuid FOR UPDATE`;
-        await tx.$queryRaw`SELECT * FROM "Account" WHERE id = ${secondId}::uuid FOR UPDATE`;
+        // Fetch Tenant fee configuration
+        const tenant = await tx.tenant.findUnique({ where: { id: tenantId } });
+        if (!tenant) throw new BadRequestException('Tenant not found');
 
-        //Fetch the strictly locked sender state
+        const feeFixed = Number(tenant.feeFixed || 0);
+        const feePercentage = Number(tenant.feePercentage || 0);
+        const calculatedFee = feeFixed + amount * feePercentage;
+        const totalFee = Math.max(0, Number(calculatedFee.toFixed(2)));
+        const totalRequired = amount + totalFee;
+
+        // Find or prepare platform revenue account if fees apply
+        let revenueAccountId: string | null = null;
+        if (totalFee > 0) {
+          let revenueAccount = await tx.account.findFirst({
+            where: { tenantId, type: 'PLATFORM_REVENUE' },
+          });
+
+          if (!revenueAccount) {
+            const senderInfo = await tx.account.findUnique({
+              where: { id: senderId },
+            });
+            if (!senderInfo)
+              throw new BadRequestException('Sender account not found');
+
+            revenueAccount = await tx.account.create({
+              data: {
+                tenantId,
+                userId: senderInfo.userId,
+                type: 'PLATFORM_REVENUE',
+                currency: senderInfo.currency || 'USD',
+                balance: 0,
+              },
+            });
+          }
+
+          revenueAccountId = revenueAccount.id;
+        }
+
+        // Always lock rows in a consistent sorted order (Deadlock Prevention)
+        const accountIdsToLock = Array.from(
+          new Set(
+            [senderId, receiverId, revenueAccountId].filter(
+              (id): id is string => Boolean(id),
+            ),
+          ),
+        ).sort();
+
+        for (const id of accountIdsToLock) {
+          await tx.$queryRaw`SELECT * FROM "Account" WHERE id = ${id}::uuid FOR UPDATE`;
+        }
+
+        // Fetch sender state
         const sender = await tx.account.findUnique({ where: { id: senderId } });
         if (!sender) throw new BadRequestException('Sender account not found');
         if (sender.tenantId !== tenantId)
           throw new BadRequestException(
             'Sender account does not belong to this tenant',
           );
-        if (Number(sender.balance) < amount)
-          throw new BadRequestException('Insufficient funds');
+        if (Number(sender.balance) < totalRequired) {
+          throw new BadRequestException(
+            `Insufficient funds. Required: ${totalRequired} (Transfer: ${amount}, Fee: ${totalFee}), Available: ${sender.balance}`,
+          );
+        }
 
         const receiver = await tx.account.findUnique({
           where: { id: receiverId },
@@ -75,7 +124,10 @@ export class TransferService {
         // Update Balances
         await tx.account.update({
           where: { id: senderId },
-          data: { balance: { decrement: amount }, version: { increment: 1 } },
+          data: {
+            balance: { decrement: totalRequired },
+            version: { increment: 1 },
+          },
         });
 
         await tx.account.update({
@@ -83,27 +135,72 @@ export class TransferService {
           data: { balance: { increment: amount }, version: { increment: 1 } },
         });
 
-        //Create the Double-Entry Ledger Records
-        await tx.ledgerEntry.createMany({
-          data: [
+        if (totalFee > 0 && revenueAccountId) {
+          await tx.account.update({
+            where: { id: revenueAccountId },
+            data: {
+              balance: { increment: totalFee },
+              version: { increment: 1 },
+            },
+          });
+        }
+
+        // Create Double-Entry Ledger Records
+        const ledgerEntriesData: Array<{
+          tenantId: string;
+          transactionId: string;
+          accountId: string;
+          amount: number;
+          feeAmount?: number;
+          type: 'TRANSFER' | 'FEE';
+          description: string;
+        }> = [
+          {
+            tenantId,
+            transactionId,
+            accountId: senderId,
+            amount: -amount,
+            type: 'TRANSFER',
+            description: description || 'Transfer debit',
+          },
+          {
+            tenantId,
+            transactionId,
+            accountId: receiverId,
+            amount: amount,
+            type: 'TRANSFER',
+            description: description || 'Transfer credit',
+          },
+        ];
+
+        if (totalFee > 0 && revenueAccountId) {
+          ledgerEntriesData.push(
             {
               tenantId,
               transactionId,
               accountId: senderId,
-              amount: -amount, // Debit
-              description,
+              amount: -totalFee,
+              feeAmount: totalFee,
+              type: 'FEE',
+              description: `Platform fee for transfer ${transactionId}`,
             },
             {
               tenantId,
               transactionId,
-              accountId: receiverId,
-              amount: amount, // Credit
-              description,
+              accountId: revenueAccountId,
+              amount: totalFee,
+              feeAmount: totalFee,
+              type: 'FEE',
+              description: `Platform fee revenue for transfer ${transactionId}`,
             },
-          ],
+          );
+        }
+
+        await tx.ledgerEntry.createMany({
+          data: ledgerEntriesData,
         });
 
-        return { transactionId, status: 'SUCCESS' };
+        return { transactionId, fee: totalFee, status: 'SUCCESS' };
       });
 
       // Dispatch background job outside of the database transaction
@@ -115,21 +212,21 @@ export class TransferService {
           senderId,
           receiverId,
           amount,
+          fee: result.fee,
           timestamp: new Date().toISOString(),
         },
         {
-          attempts: 5, // Retry up to 5 times if the merchant API fails
+          attempts: 5,
           backoff: {
             type: 'exponential',
-            delay: 2000, // 2s, 4s, 8s, 16s, 32s
+            delay: 2000,
           },
-          removeOnComplete: true, // Keep Redis clean
+          removeOnComplete: true,
         },
       );
 
       return result;
     } catch (error) {
-      // Re-throw known HTTP exceptions
       if (error instanceof BadRequestException) throw error;
       throw new InternalServerErrorException(
         'Transfer failed due to a system error',
@@ -153,8 +250,7 @@ export class TransferService {
     amount: number,
     description: string,
   ) {
-    if (!tenantId)
-      throw new BadRequestException('Tenant ID is required');
+    if (!tenantId) throw new BadRequestException('Tenant ID is required');
     if (amount <= 0)
       throw new BadRequestException('Hold amount must be greater than zero');
 
@@ -168,8 +264,7 @@ export class TransferService {
         const account = await tx.account.findUnique({
           where: { id: accountId },
         });
-        if (!account)
-          throw new NotFoundException('Account not found');
+        if (!account) throw new NotFoundException('Account not found');
         if (account.tenantId !== tenantId)
           throw new BadRequestException(
             'Account does not belong to this tenant',
@@ -236,8 +331,7 @@ export class TransferService {
     amount: number,
     description: string,
   ) {
-    if (!tenantId)
-      throw new BadRequestException('Tenant ID is required');
+    if (!tenantId) throw new BadRequestException('Tenant ID is required');
     if (amount <= 0)
       throw new BadRequestException('Capture amount must be greater than zero');
 
@@ -273,8 +367,7 @@ export class TransferService {
         const sender = await tx.account.findUnique({
           where: { id: senderId },
         });
-        if (!sender)
-          throw new NotFoundException('Sender account not found');
+        if (!sender) throw new NotFoundException('Sender account not found');
 
         const heldAmount = Math.abs(Number(holdEntry.amount));
         if (amount > heldAmount)
@@ -283,9 +376,7 @@ export class TransferService {
           );
 
         if (Number(sender.holdBalance) < amount)
-          throw new BadRequestException(
-            'Insufficient held balance to capture',
-          );
+          throw new BadRequestException('Insufficient held balance to capture');
 
         const receiver = await tx.account.findUnique({
           where: { id: receiverId },
@@ -349,8 +440,7 @@ export class TransferService {
               accountId: senderId,
               amount: -amount, // Debit
               type: 'TRANSFER',
-              description:
-                description || `Capture of hold ${holdId}`,
+              description: description || `Capture of hold ${holdId}`,
             },
             {
               tenantId,
@@ -358,8 +448,7 @@ export class TransferService {
               accountId: receiverId,
               amount: amount, // Credit
               type: 'TRANSFER',
-              description:
-                description || `Capture of hold ${holdId}`,
+              description: description || `Capture of hold ${holdId}`,
             },
           ],
         });
@@ -419,12 +508,9 @@ export class TransferService {
     amount: number,
     description: string,
   ) {
-    if (!tenantId)
-      throw new BadRequestException('Tenant ID is required');
+    if (!tenantId) throw new BadRequestException('Tenant ID is required');
     if (amount <= 0)
-      throw new BadRequestException(
-        'Release amount must be greater than zero',
-      );
+      throw new BadRequestException('Release amount must be greater than zero');
 
     const transactionId = randomUUID();
 
@@ -451,8 +537,7 @@ export class TransferService {
         const account = await tx.account.findUnique({
           where: { id: accountId },
         });
-        if (!account)
-          throw new NotFoundException('Account not found');
+        if (!account) throw new NotFoundException('Account not found');
 
         const heldAmount = Math.abs(Number(holdEntry.amount));
         if (amount > heldAmount)
@@ -461,9 +546,7 @@ export class TransferService {
           );
 
         if (Number(account.holdBalance) < amount)
-          throw new BadRequestException(
-            'Insufficient held balance to release',
-          );
+          throw new BadRequestException('Insufficient held balance to release');
 
         // Move funds back: holdBalance → balance
         await tx.account.update({

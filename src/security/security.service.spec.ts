@@ -4,6 +4,7 @@ import { RedisService } from '../redis/redis.service';
 
 describe('SecurityService', () => {
   let service: SecurityService;
+  let module: TestingModule;
 
   const mockRedisService = {
     getClient: jest.fn().mockReturnValue({
@@ -18,7 +19,7 @@ describe('SecurityService', () => {
   };
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [
         SecurityService,
         { provide: RedisService, useValue: mockRedisService },
@@ -26,6 +27,12 @@ describe('SecurityService', () => {
     }).compile();
 
     service = module.get<SecurityService>(SecurityService);
+  });
+
+  afterEach(async () => {
+    if (module) {
+      await module.close();
+    }
   });
 
   it('should be defined', () => {

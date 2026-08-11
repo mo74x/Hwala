@@ -5,6 +5,7 @@ import { RedisService } from './redis.service';
 
 describe('RedisService', () => {
   let service: RedisService;
+  let module: TestingModule;
 
   const mockConfigService = {
     get: jest
@@ -13,7 +14,7 @@ describe('RedisService', () => {
   };
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [
         RedisService,
         { provide: ConfigService, useValue: mockConfigService },
@@ -21,6 +22,12 @@ describe('RedisService', () => {
     }).compile();
 
     service = module.get<RedisService>(RedisService);
+  });
+
+  afterEach(async () => {
+    if (module) {
+      await module.close();
+    }
   });
 
   it('should be defined', () => {

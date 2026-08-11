@@ -1,3 +1,4 @@
+/* eslint-disable no-global-assign */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
@@ -10,7 +11,9 @@ import { RedisService } from '../redis/redis.service';
 
 describe('ExchangeService', () => {
   let service: ExchangeService;
+  let module: TestingModule;
   let redisService: jest.Mocked<RedisService>;
+
   let configService: jest.Mocked<ConfigService>;
   let mockRedisClient: any;
 
@@ -41,7 +44,7 @@ describe('ExchangeService', () => {
       }),
     } as any;
 
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [
         ExchangeService,
         { provide: RedisService, useValue: redisService },
@@ -53,6 +56,12 @@ describe('ExchangeService', () => {
 
     // Reset global fetch mock if any
     jest.restoreAllMocks();
+  });
+
+  afterEach(async () => {
+    if (module) {
+      await module.close();
+    }
   });
 
   it('should be defined', () => {

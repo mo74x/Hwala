@@ -11,13 +11,14 @@ import { IdempotencyInterceptor } from '../common/interceptors/idempotency/idemp
 
 describe('TransferController', () => {
   let controller: TransferController;
+  let module: TestingModule;
 
   const mockTransferService = {
     executeTransfer: jest.fn(),
   };
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       controllers: [TransferController],
       providers: [{ provide: TransferService, useValue: mockTransferService }],
     })
@@ -32,6 +33,12 @@ describe('TransferController', () => {
       .compile();
 
     controller = module.get<TransferController>(TransferController);
+  });
+
+  afterEach(async () => {
+    if (module) {
+      await module.close();
+    }
   });
 
   it('should be defined', () => {

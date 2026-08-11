@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/unbound-method */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
@@ -13,6 +14,7 @@ import { BullMQHealthIndicator } from './indicators/bullmq.health';
 describe('HealthController', () => {
   let controller: HealthController;
   let healthCheckService: HealthCheckService;
+  let module: TestingModule;
 
   const mockPrismaHealth = {
     isHealthy: jest.fn().mockResolvedValue({ database: { status: 'up' } }),
@@ -39,7 +41,7 @@ describe('HealthController', () => {
   };
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       controllers: [HealthController],
       providers: [
         { provide: HealthCheckService, useValue: mockHealthCheckService },
@@ -51,6 +53,12 @@ describe('HealthController', () => {
 
     controller = module.get<HealthController>(HealthController);
     healthCheckService = module.get<HealthCheckService>(HealthCheckService);
+  });
+
+  afterEach(async () => {
+    if (module) {
+      await module.close();
+    }
   });
 
   it('should be defined', () => {

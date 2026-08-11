@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 describe('ApiKeysService', () => {
   let service: ApiKeysService;
+  let module: TestingModule;
 
   const mockPrismaService = {
     apiKey: {
@@ -16,7 +17,7 @@ describe('ApiKeysService', () => {
   };
 
   beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    module = await Test.createTestingModule({
       providers: [
         ApiKeysService,
         { provide: PrismaService, useValue: mockPrismaService },
@@ -24,6 +25,12 @@ describe('ApiKeysService', () => {
     }).compile();
 
     service = module.get<ApiKeysService>(ApiKeysService);
+  });
+
+  afterEach(async () => {
+    if (module) {
+      await module.close();
+    }
   });
 
   it('should be defined', () => {

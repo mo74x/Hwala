@@ -69,7 +69,9 @@ export class WebhookProcessor extends WorkerHost {
 
     try {
       // Simulate network delay and HTTP request execution with X-Signature header
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const delay = process.env.NODE_ENV === 'test' ? 0 : 1000;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+
       const isFlakyNetwork = Math.random() < 0.3;
       if (isFlakyNetwork) {
         throw new Error('Merchant API responded with 503 Service Unavailable');
