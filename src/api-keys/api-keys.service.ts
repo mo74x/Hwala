@@ -1,16 +1,15 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 
 @Injectable()
 export class ApiKeysService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly auditService?: AuditService,
+  ) {}
 
   /**
    * Generates a new API Key for a tenant.
@@ -36,6 +35,15 @@ export class ApiKeysService {
         scopes,
       },
     });
+
+    if (this.auditService) {
+      await this.auditService.log({
+        tenantId,
+        action: 'API_KEY_CREATED',
+        targetId: apiKey.id,
+        metadata: { name: apiKey.name, scopes: apiKey.scopes },
+      });
+    }
 
     return {
       apiKey: rawKey,
@@ -107,6 +115,15 @@ export class ApiKeysService {
     await this.prisma.apiKey.delete({
       where: { id },
     });
+
+    if (this.auditService) {
+      await this.auditService.log({
+        tenantId,
+        action: 'API_KEY_REVOKED',
+        targetId: id,
+        metadata: { name: apiKeyRecord.name },
+      });
+    }
 
     return { message: 'API key revoked successfully', id };
   }

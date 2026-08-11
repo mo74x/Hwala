@@ -21,6 +21,8 @@ import { HealthModule } from './health/health.module';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
 import { ExchangeModule } from './exchange/exchange.module';
 import { WebhookModule } from './webhook/webhook.module';
+import { AuditModule } from './audit/audit.module';
+import { RiskModule } from './risk/risk.module';
 
 @Module({
   imports: [
@@ -31,6 +33,8 @@ import { WebhookModule } from './webhook/webhook.module';
     HealthModule,
     ExchangeModule,
     WebhookModule,
+    AuditModule,
+    RiskModule,
 
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule, RedisModule],

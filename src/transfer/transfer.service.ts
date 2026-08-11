@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { SecurityService } from '../security/security.service';
+import { RiskService } from '../risk/risk.service';
 
 @Injectable()
 export class TransferService {
@@ -20,6 +21,8 @@ export class TransferService {
     @InjectQueue('webhook_queue')
     private readonly webhookQueue?: Queue,
     private readonly securityService?: SecurityService,
+    @Optional()
+    private readonly riskService?: RiskService,
   ) {}
 
   // ────────────────────────────────────────────────────────────────
@@ -45,6 +48,21 @@ export class TransferService {
     // Check velocity limits BEFORE starting the DB transaction if security service is present
     if (this.securityService) {
       await this.securityService.enforceTransferVelocity(senderId);
+    }
+
+    // Evaluate risk rules (velocity and high-value limits)
+    if (this.riskService) {
+      const riskResult = await this.riskService.evaluateTransaction({
+        tenantId,
+        accountId: senderId,
+        amount,
+      });
+
+      if (riskResult.blocked) {
+        throw new BadRequestException(
+          `Transaction blocked by Risk Engine: ${riskResult.reasons.join('; ')}`,
+        );
+      }
     }
 
     const transactionId = randomUUID();
