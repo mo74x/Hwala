@@ -1,0 +1,40 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Build outputs and dependencies
+dist
+node_modules
+generated
+coverage
+.temp
+.tmp
+
+# Logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Tooling and IDE configs
+.agents
+.claude
+.windsurf
+.vscode
+.idea
+*.sublime-workspace
+skills-lock.json
+implementation_plan.md
+walkthrough.md
+
+# Testing
+test
+*.spec.ts
