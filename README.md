@@ -1,11 +1,11 @@
 <p align="center">
-  <h1 align="center">Hwala</h1>
-  <p align="center">
-    <b>Enterprise-Grade, Multi-Tenant Digital Wallet and Financial Ledger Engine</b>
-  </p>
-  <p align="center">
-    Built with NestJS 11 | Prisma 7 | PostgreSQL 16 | Redis 7 | BullMQ
-  </p>
+  <img src="assets/banner.png" alt="Hwala — Multi-Tenant Digital Wallet and Financial Ledger Engine" width="100%" />
+</p>
+
+<p align="center">
+  <b>Enterprise-Grade, Multi-Tenant Digital Wallet and Financial Ledger Engine</b>
+  <br/>
+  Built with NestJS 11 | Prisma 7 | PostgreSQL 16 | Redis 7 | BullMQ
 </p>
 
 ---
