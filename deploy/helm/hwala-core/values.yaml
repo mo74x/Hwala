@@ -1,0 +1,88 @@
+global:
+  environment: dev
+
+image:
+  repository: ghcr.io/mo74x/hawala
+  pullPolicy: IfNotPresent
+  tag: "latest"
+  pullSecrets:
+    - name: ghcr-secret
+
+api:
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  env:
+    NODE_ENV: development
+    PORT: 3000
+
+worker:
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+service:
+  type: NodePort
+  port: 3000
+  nodePort: 30000
+
+ingress:
+  enabled: true
+  className: nginx
+  path: /
+  pathType: Prefix
+  host: hawala.local
+
+hpa:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  enabled: false
+  minAvailable: 1
+
+postgres:
+  enabled: true
+  user: hawala_user
+  password: hawala_password
+  database: hawala_db
+  storageSize: 5Gi
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+redis:
+  enabled: true
+  password: ""
+  storageSize: 2Gi
+  resources:
+    limits:
+      cpu: 250m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+secrets:
+  jwtSecret: "dev-secret-change-me-in-production-32-chars"
+
+config:
+  throttleTtl: "60000"
+  throttleLimit: "100"
+  corsOrigin: "*"
