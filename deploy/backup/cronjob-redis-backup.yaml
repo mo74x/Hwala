@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hwala-redis-backup
+  namespace: hwala-production
+  labels:
+    app.kubernetes.io/name: hwala-core
+    app.kubernetes.io/component: redis-backup
+spec:
+  schedule: "0 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: redis-backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: redis-backup
+              image: redis:7-alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+                  BACKUP_DIR="/backups/redis"
+                  FILE_NAME="dump_${TIMESTAMP}.rdb"
+                  mkdir -p ${BACKUP_DIR}
+
+                  echo "[$(date)] Triggering Redis BGSAVE..."
+                  redis-cli -h ${REDIS_HOST} -p 6379 BGSAVE
+
+                  sleep 10
+
+                  echo "[$(date)] Copying RDB snapshot..."
+                  if [ -f /data/dump.rdb ]; then
+                    cp /data/dump.rdb ${BACKUP_DIR}/${FILE_NAME}
+                    echo "[$(date)] Redis backup completed: ${FILE_NAME}"
+                  else
+                    echo "[$(date)] Warning: /data/dump.rdb not found!"
+                  fi
+
+                  # Retention: Remove RDB snapshots older than 7 days
+                  find ${BACKUP_DIR} -name "dump_*.rdb" -mtime +7 -exec rm {} \;
+                  echo "[$(date)] Retention cleanup finished."
+              env:
+                - name: REDIS_HOST
+                  value: "hwala-core-redis"
+              volumeMounts:
+                - name: redis-data
+                  mountPath: /data
+                - name: backup-storage
+                  mountPath: /backups
+          volumes:
+            - name: redis-data
+              persistentVolumeClaim:
+                claimName: redis-data-hwala-core-redis-0
+            - name: backup-storage
+              persistentVolumeClaim:
+                claimName: hwala-backup-pvc
