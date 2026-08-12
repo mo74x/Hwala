@@ -1,0 +1,131 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches: [develop, staging]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: 'Target Deployment Environment'
+        required: true
+        default: 'qa'
+        type: choice
+        options:
+          - dev
+          - staging
+          - qa
+          - production
+      image_tag:
+        description: 'Docker image tag (defaults to commit SHA)'
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  determine-env:
+    name: Determine Target Environment
+    runs-on: ubuntu-latest
+    outputs:
+      target_env: ${{ steps.env-set.outputs.target_env }}
+      image_tag: ${{ steps.env-set.outputs.image_tag }}
+    steps:
+      - id: env-set
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TARGET="${{ inputs.target_env }}"
+            TAG="${{ inputs.image_tag }}"
+          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            TARGET="dev"
+            TAG="${{ github.sha }}"
+          elif [ "${{ github.ref }}" = "refs/heads/staging" ]; then
+            TARGET="staging"
+            TAG="${{ github.sha }}"
+          elif [[ "${{ github.ref }}" =~ ^refs/tags/v.* ]]; then
+            TARGET="production"
+            TAG="${github_ref#refs/tags/}"
+          else
+            TARGET="dev"
+            TAG="${{ github.sha }}"
+          fi
+          if [ -z "$TAG" ]; then
+            TAG="${{ github.sha }}"
+          fi
+          echo "target_env=$TARGET" >> $GITHUB_OUTPUT
+          echo "image_tag=$TAG" >> $GITHUB_OUTPUT
+
+  deploy:
+    name: Deploy & Migrate
+    needs: determine-env
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.determine-env.outputs.target_env }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Prisma Database Migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx prisma migrate deploy
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.14.0'
+
+      - name: Set Kubernetes Context
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBECONFIG }}
+
+      - name: Deploy Helm Chart
+        run: |
+          ENV="${{ needs.determine-env.outputs.target_env }}"
+          TAG="${{ needs.determine-env.outputs.image_tag }}"
+          VALUES_FILE="deploy/helm/hwala-core/values-${ENV}.yaml"
+          if [ ! -f "$VALUES_FILE" ]; then
+            VALUES_FILE="deploy/helm/hwala-core/values.yaml"
+          fi
+
+          helm upgrade --install hwala-core deploy/helm/hwala-core/ \
+            --namespace "hwala-${ENV}" \
+            --create-namespace \
+            --values "$VALUES_FILE" \
+            --set image.repository="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" \
+            --set image.tag="$TAG" \
+            --wait \
+            --timeout 5m0s
+
+      - name: Verify Deployment Rollout Status
+        run: |
+          ENV="${{ needs.determine-env.outputs.target_env }}"
+          kubectl rollout status deployment/hwala-api -n "hwala-${ENV}" --timeout=120s
+          kubectl rollout status deployment/hwala-worker -n "hwala-${ENV}" --timeout=120s
+
+      - name: Run Smoke Tests against Deployed Endpoint
+        run: |
+          ENV="${{ needs.determine-env.outputs.target_env }}"
+          echo "Running smoke tests for environment hwala-${ENV}..."
+          kubectl exec -n "hwala-${ENV}" deployment/hwala-api -- wget --spider -q http://localhost:3000/health || exit 1
+
+      - name: Rollback Helm Release on Failure
+        if: failure()
+        run: |
+          ENV="${{ needs.determine-env.outputs.target_env }}"
+          echo "Deployment failed! Rolling back Helm release..."
+          helm rollback hwala-core -n "hwala-${ENV}"
