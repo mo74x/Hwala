@@ -1,0 +1,12 @@
+trivy:
+  ignoreUnfixed: true
+  severity: HIGH,CRITICAL
+
+operator:
+  scanJobsConcurrentLimit: 2
+  scanJobTimeout: 5m
+
+targetNamespaces: "hwala-dev,hwala-staging,hwala-qa,hwala-production"
+
+compliance:
+  reportType: summary

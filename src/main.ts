@@ -12,7 +12,11 @@ async function bootstrap() {
   // Enable graceful shutdown hooks for SIGTERM / SIGINT signals
   app.enableShutdownHooks();
 
-  // Apply security HTTP headers using Helmet
+  // Disable Express signature header
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  app.getHttpAdapter().getInstance().disable('x-powered-by');
+
+  // Apply strict security HTTP headers using Helmet
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -23,6 +27,15 @@ async function bootstrap() {
           scriptSrc: [`'self'`, `'unsafe-inline'`, `'unsafe-eval'`],
         },
       },
+      crossOriginEmbedderPolicy: false,
+      hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true,
+      },
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+      xFrameOptions: { action: 'deny' },
+      xContentTypeOptions: true,
     }),
   );
 
