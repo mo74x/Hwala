@@ -23,6 +23,7 @@ import { ExchangeModule } from './exchange/exchange.module';
 import { WebhookModule } from './webhook/webhook.module';
 import { AuditModule } from './audit/audit.module';
 import { RiskModule } from './risk/risk.module';
+import { MetricsModule } from './common/metrics/metrics.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { RiskModule } from './risk/risk.module';
     PrismaModule,
     RedisModule,
     HealthModule,
+    MetricsModule,
     ExchangeModule,
     WebhookModule,
     AuditModule,

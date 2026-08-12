@@ -1,0 +1,24 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: hwala-core-servicemonitor
+  namespace: monitoring
+  labels:
+    release: prometheus
+    app.kubernetes.io/name: hwala-core
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hwala-core
+      app.kubernetes.io/component: api
+  namespaceSelector:
+    matchNames:
+      - hwala-dev
+      - hwala-staging
+      - hwala-qa
+      - hwala-production
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s

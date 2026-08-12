@@ -1,0 +1,33 @@
+loki:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 10Gi
+  config:
+    table_manager:
+      retention_deletes_enabled: true
+      retention_period: 30d
+
+promtail:
+  enabled: true
+  config:
+    snippets:
+      pipelineStages:
+        - json:
+            expressions:
+              level: level
+              timestamp: timestamp
+              message: message
+              traceId: traceId
+
+grafana:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 5Gi
+  adminPassword: "admin-password-change-in-production"
+  sidecar:
+    dashboards:
+      enabled: true
+    datasources:
+      enabled: true

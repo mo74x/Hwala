@@ -1,0 +1,78 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "HTTP Throughput (Req/Sec)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(nestjs_http_requests_total[1m])) by (method, route)",
+          "legendFormat": "{{method}} {{route}}"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "title": "HTTP Request Duration (Sum/Sec)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(nestjs_http_request_duration_seconds_sum[1m])) by (route)",
+          "legendFormat": "{{route}}"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "title": "Total Financial Transfers Executed",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(hwala_transfers_total)",
+          "legendFormat": "Transfers"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "title": "Resident Memory Usage (RSS)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes",
+          "legendFormat": "RSS Memory"
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["hwala", "nestjs", "prometheus"],
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Hwala Core Overview Dashboard",
+  "uid": "hwala-core-overview",
+  "version": 1
+}

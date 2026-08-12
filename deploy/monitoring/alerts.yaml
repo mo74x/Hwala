@@ -1,0 +1,66 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: hwala-core-alert-rules
+  namespace: monitoring
+  labels:
+    release: prometheus
+    app.kubernetes.io/name: hwala-core
+spec:
+  groups:
+    - name: hwala-core.rules
+      rules:
+        - alert: HighErrorRate
+          expr: |
+            (sum(rate(nestjs_http_requests_total{status=~"5.."}[5m])) / sum(rate(nestjs_http_requests_total[5m]))) * 100 > 5
+          for: 5m
+          labels:
+            severity: critical
+            channel: email
+          annotations:
+            summary: "High HTTP 5xx Error Rate detected on Hwala API"
+            description: "HTTP 5xx error rate has exceeded 5% over the last 5 minutes. Current rate is {{ $value }}%."
+
+        - alert: HighLatency
+          expr: |
+            (sum(rate(nestjs_http_request_duration_seconds_sum[5m])) / sum(rate(nestjs_http_request_duration_seconds_count[5m]))) > 2
+          for: 5m
+          labels:
+            severity: warning
+            channel: email
+          annotations:
+            summary: "High HTTP Request Latency on Hwala API"
+            description: "Average HTTP response latency exceeded 2 seconds over the last 5 minutes."
+
+        - alert: PodCrashLooping
+          expr: |
+            rate(kube_pod_container_status_restarts_total{pod=~".*hwala.*"}[10m]) * 600 > 3
+          for: 5m
+          labels:
+            severity: critical
+            channel: email
+          annotations:
+            summary: "Hwala Pod is CrashLooping"
+            description: "Pod {{ $labels.pod }} restarted more than 3 times in 10 minutes."
+
+        - alert: RedisMemoryHigh
+          expr: |
+            container_memory_usage_bytes{container=~".*redis.*"} / container_spec_memory_limit_bytes{container=~".*redis.*"} * 100 > 80
+          for: 10m
+          labels:
+            severity: warning
+            channel: email
+          annotations:
+            summary: "Redis Cache Memory Usage High"
+            description: "Redis memory utilization is above 80% on pod {{ $labels.pod }}."
+
+        - alert: DiskSpaceLow
+          expr: |
+            kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes * 100 > 85
+          for: 15m
+          labels:
+            severity: warning
+            channel: email
+          annotations:
+            summary: "Persistent Volume Disk Usage High"
+            description: "Volume {{ $labels.persistentvolumeclaim }} is over 85% full."
