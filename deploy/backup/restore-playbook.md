@@ -1,10 +1,10 @@
-# Disaster Recovery & Database Restore Playbook
+# Disaster Recovery and Database Restore Playbook
 
 This runbook outlines emergency recovery procedures for restoring PostgreSQL ledger databases and Redis state from automated backups.
 
 ---
 
-## 🗄️ PostgreSQL Restore Procedure
+## PostgreSQL Restore Procedure
 
 ### Scenario: Point-in-Time Database Recovery
 
@@ -18,7 +18,7 @@ Identify the latest healthy backup in `/backups/postgres/`:
 kubectl exec -n hwala-production -it deploy/hwala-core-api -- ls -lh /backups/postgres/
 ```
 
-#### 2. Scale Down App & Worker Pods
+#### 2. Scale Down App and Worker Pods
 
 Scale down API and Worker deployments to prevent write operations during restore:
 
@@ -58,7 +58,7 @@ kubectl rollout status deployment/hwala-core-api -n hwala-production
 
 ---
 
-## 🔴 Redis Cache & Queue State Restore Procedure
+## Redis Cache and Queue State Restore Procedure
 
 ### Scenario: Restoring Redis RDB Snapshot
 
@@ -69,7 +69,7 @@ kubectl scale deployment hwala-core-api --replicas=0 -n hwala-production
 kubectl scale deployment hwala-core-worker --replicas=0 -n hwala-production
 ```
 
-#### 2. Replace RDB File & Restart Redis
+#### 2. Replace RDB File and Restart Redis
 
 ```bash
 NAMESPACE="hwala-production"
@@ -83,7 +83,7 @@ kubectl exec -n ${NAMESPACE} -it ${REDIS_POD} -- cp ${RDB_BACKUP} /data/dump.rdb
 kubectl delete pod ${REDIS_POD} -n ${NAMESPACE}
 ```
 
-#### 3. Verify Redis Health & Restore API
+#### 3. Verify Redis Health and Restore API
 
 ```bash
 # Check Redis readiness
