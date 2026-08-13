@@ -28,7 +28,7 @@ env:
 jobs:
   determine-env:
     name: Determine Target Environment
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     outputs:
       target_env: ${{ steps.env-set.outputs.target_env }}
       image_tag: ${{ steps.env-set.outputs.image_tag }}
@@ -60,7 +60,7 @@ jobs:
   deploy:
     name: Deploy & Migrate
     needs: determine-env
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     environment:
       name: ${{ needs.determine-env.outputs.target_env }}
 

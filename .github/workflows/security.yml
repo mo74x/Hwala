@@ -4,11 +4,10 @@ on:
   schedule:
     - cron: '0 0 * * 0' # Every Sunday at midnight UTC
   workflow_dispatch:
-
 jobs:
   npm-audit:
     name: NPM Dependency Audit
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -23,7 +22,7 @@ jobs:
 
   codeql-sast:
     name: CodeQL Static Analysis (SAST)
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     permissions:
       actions: read
       contents: read
@@ -45,7 +44,7 @@ jobs:
 
   container-cve-scan:
     name: Container CVE Vulnerability Scan
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     permissions:
       security-events: write
 

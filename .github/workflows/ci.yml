@@ -13,7 +13,7 @@ env:
 jobs:
   lint-and-typecheck:
     name: Lint & Type Check
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -35,7 +35,7 @@ jobs:
 
   unit-tests:
     name: Unit Tests & Coverage
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -57,7 +57,7 @@ jobs:
 
   e2e-tests:
     name: E2E Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     services:
       postgres:
         image: postgres:16-alpine
@@ -72,7 +72,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
       redis:
         image: redis:7-alpine
         ports:
@@ -82,7 +81,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -114,7 +112,7 @@ jobs:
   build-and-scan:
     name: Build & Security Scan
     needs: [lint-and-typecheck, unit-tests, e2e-tests]
-    runs-on: ubuntu-latest
+    runs-on: tenki-standard-small-2c-4g
     permissions:
       contents: read
       packages: write
